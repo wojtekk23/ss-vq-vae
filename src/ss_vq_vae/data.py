@@ -53,7 +53,7 @@ class AudioTupleDataset(torch.utils.data.Dataset):
             style_mels = self._mel_preprocess_fn(y=audios[1])
         if self._preprocess_fn is not None:
             audios = [self._preprocess_fn(audio) for audio in audios]
-            
+        
         if self._no_ground:
             return tuple([audios[0], style_mels if style_mels is not None else audios[1]])
         else:
