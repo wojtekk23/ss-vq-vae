@@ -463,7 +463,7 @@ class Experiment:
 @confugue.configurable
 class ExperimentZeroShot:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, pretrained_cola=None, continue_training=False, frozen_style_encoder=True, continue_step=None):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, pretrained_style_encoder=None, continue_training=False, frozen_style_encoder=True, continue_step=None):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
@@ -484,8 +484,8 @@ class ExperimentZeroShot:
         
         if continue_training:
             self.model.load_state_dict(torch.load(os.path.join(self.logdir, 'model_state.pt')))
-        elif pretrained_cola:
-            self.model.style_encoder.load_state_dict(torch.load(pretrained_cola))
+        elif pretrained_style_encoder:
+            self.model.style_encoder.load_state_dict(torch.load(pretrained_style_encoder))
         self.model.to(self.device)
         
         self.optimizer = None
@@ -757,7 +757,7 @@ class ExperimentZeroShot:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--logdir', type=str, required=True)
-    parser.add_argument('--pretrained_cola', type=str, help='Path to pretrained cola model')
+    parser.add_argument('--pretrained_style_encoder', type=str, help='Path to pretrained style encoder model (rnn and 1d weights for the "original" model, COLA weights for the "zero_shot" model)')
     parser.add_argument('--continue_training', dest='continue_training', action='store_true')
     parser.add_argument('--unfrozen_style_encoder', dest='frozen_style_encoder', action='store_false')
     parser.add_argument('--model_type', type=str, choices=['zero_shot', 'original'], default='zero_shot')
@@ -797,7 +797,7 @@ def main():
     if args.model_type == 'zero_shot':
         cfg_path = os.path.join(args.logdir, 'config-zero-shot.yaml')
         cfg = confugue.Configuration.from_yaml_file(cfg_path)
-        exp = cfg.configure(ExperimentZeroShot, device='cuda', config_path=cfg_path, logdir=args.logdir, pretrained_cola=args.pretrained_cola, continue_training=args.continue_training, frozen_style_encoder=args.frozen_style_encoder, continue_step=continue_step, sr=16_000)
+        exp = cfg.configure(ExperimentZeroShot, device='cuda', config_path=cfg_path, logdir=args.logdir, pretrained_style_encoder=args.pretrained_style_encoder, continue_training=args.continue_training, frozen_style_encoder=args.frozen_style_encoder, continue_step=continue_step, sr=16_000)
     else:
         cfg_path = os.path.join(args.logdir, 'config.yaml')
         cfg = confugue.Configuration.from_yaml_file(cfg_path)
