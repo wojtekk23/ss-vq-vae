@@ -84,19 +84,19 @@ class Model(nn.Module):
         # Mask positions corresponding to padding
         length = (length // (input.shape[2] / encoded.shape[2])).to(torch.int)
         mask = (torch.arange(encoded.shape[2], device=encoded.device) < length[:, None])[:, None, :]
-        encoded *= mask
+        encoded = encoded * mask
 
         if self.style_encoder_rnn is not None:
             encoded = encoded.transpose(1, 2)
             encoded = nn.utils.rnn.pack_padded_sequence(
-                encoded, length.clamp(min=1),
+                encoded, length.clamp(min=1).to('cpu'),
                 batch_first=True, enforce_sorted=False)
             _, encoded = self.style_encoder_rnn(encoded)
             # Get rid of layer dimension
             encoded = encoded.transpose(0, 1).reshape(input.shape[0], -1)
         else:
             # Compute the Gram matrix, normalized by the length squared
-            encoded /= mask.sum(dim=2, keepdim=True) + torch.finfo(encoded.dtype).eps
+            encoded = encoded / mask.sum(dim=2, keepdim=True) + torch.finfo(encoded.dtype).eps
             encoded = torch.matmul(encoded, encoded.transpose(1, 2))
         encoded = encoded.reshape(encoded.shape[0], -1)
 
@@ -125,7 +125,7 @@ class Model(nn.Module):
         # Make sure output lengths are the same as input lengths
         if length is not None:
             mask = (torch.arange(max_length, device=decoded.device) < length[:, None])[:, None, :]
-            decoded *= mask
+            decoded = decoded * mask
 
         return decoded
 
@@ -245,7 +245,7 @@ class ModelZeroShotUnfrozenStyle(ModelZeroShot):
 @confugue.configurable
 class Experiment:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=22050):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
@@ -257,6 +257,10 @@ class Experiment:
         self.model = self._cfg['model'].configure(Model)
         LOGGER.info(self.model)
         self.device = torch.device(device)
+        self.continue_training = continue_training
+        self.continue_step = continue_step
+        if continue_training:
+            self.model.load_state_dict(torch.load(os.path.join(self.logdir, 'model_state.pt')))
         self.model.to(self.device)
         self.optimizer = None
 
@@ -271,10 +275,15 @@ class Experiment:
             if not self.optimizer:
                 self.optimizer = self._cfg['optimizer'].configure(
                     torch.optim.Adam, params=self.model.parameters())
+            if self.continue_training:
+                try:
+                    self.optimizer.load_state_dict(torch.load(os.path.join(self.logdir, 'optimizer.pt')))
+                except:
+                    LOGGER.warning('Optimizer incompatible (Check frozen vs unfrozen style encoder). Moving on with fresh optimizer...')
 
             loader_train = self._cfg['train_loader'].configure(
                 torch.utils.data.DataLoader,
-                dataset=self._get_dataset('train', lazy=False),
+                dataset=self._get_dataset('train'),
                 collate_fn=util.collate_padded_tuples,
                 shuffle=True)
             loader_val = self._cfg['val_loader'].configure(
@@ -285,9 +294,10 @@ class Experiment:
             num_epochs = self._cfg.get('epochs', 1)
             val_period = self._cfg.get('val_period', np.nan)
             log_period = self._cfg.get('log_period', 1)
+            save_period = self._cfg.get('save_period', 20)
             sample_period = self._cfg.get('sample_period', 1)
 
-            i = 0
+            i = self.continue_step
             for epoch in range(num_epochs):
                 LOGGER.info('Starting epoch %d / %d', epoch + 1, num_epochs)
                 for (input_c, length_c), (input_s, length_s) in loader_train:
@@ -308,6 +318,14 @@ class Experiment:
                         self.model.train(True)
                     _, losses = self.model(input_c, input_s, length_c, length_s, return_losses=True)
                     self._add_total_loss(losses, step=i)
+                    print(f"Step {i}, loss: {losses['total']}")
+                    
+                    if i % save_period == 0:
+                        LOGGER.info('Saving model at step %d', i)
+                        torch.save(self.model.state_dict(), os.path.join(self.logdir, 'model_state.pt'))
+                        torch.save(self.optimizer.state_dict(), os.path.join(self.logdir, 'optimizer.pt'))
+                        with open(os.path.join(self.logdir, 'last_step.txt'), 'w') as f:
+                            print(i, file=f)
 
                     # Logging
                     if i % log_period == 0:
@@ -320,7 +338,8 @@ class Experiment:
 
                     # Backward pass
                     self.optimizer.zero_grad()
-                    losses['total'].backward()
+                    with torch.autograd.set_detect_anomaly(True):
+                        losses['total'].backward()
                     if i % log_period == 0:
                         self._log_params(tb_writer, i)
                     self.optimizer.step()
@@ -392,8 +411,8 @@ class Experiment:
                                     global_step=step)
 
         if write_model:
-            torch.save(self.model, os.path.join(self.logdir, 'model.pt'))
             torch.save(self.model.state_dict(), os.path.join(self.logdir, 'model_state.pt'))
+            torch.save(self.optimizer.state_dict(), os.path.join(self.logdir, 'optimizer.pt'))
 
         return outputs, losses
 
@@ -444,7 +463,7 @@ class Experiment:
 @confugue.configurable
 class ExperimentZeroShot:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=22050, pretrained_cola=None, continue_training=False, frozen_style_encoder=True, continue_step=None):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, pretrained_cola=None, continue_training=False, frozen_style_encoder=True, continue_step=None):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
@@ -468,7 +487,7 @@ class ExperimentZeroShot:
         elif pretrained_cola:
             self.model.style_encoder.load_state_dict(torch.load(pretrained_cola))
         self.model.to(self.device)
-
+        
         self.optimizer = None
         self.continue_training = continue_training
         self.continue_step = continue_step
@@ -676,6 +695,9 @@ class ExperimentZeroShot:
                 audio_gt = self.postprocess(ground_truth)
                 tb_writer.add_audio(f'gt_{suffix}/{j}/audio', audio_gt, sample_rate=self.sr,
                                     global_step=step)
+                
+                chroma_mse = util.compare_chroma(audio, audio_gt, sr=self.sr)
+                tb_writer.add_scalar(f'chroma_mse/{j}', chroma_mse, step)
 
         if write_model:
             torch.save(self.model.state_dict(), os.path.join(self.logdir, 'model_state.pt'))
@@ -738,6 +760,7 @@ def main():
     parser.add_argument('--pretrained_cola', type=str, help='Path to pretrained cola model')
     parser.add_argument('--continue_training', dest='continue_training', action='store_true')
     parser.add_argument('--unfrozen_style_encoder', dest='frozen_style_encoder', action='store_false')
+    parser.add_argument('--model_type', type=str, choices=['zero_shot', 'original'], default='zero_shot')
     actions = parser.add_subparsers(title='action')
     train_parser = actions.add_parser('train', help='Train the model')
     train_parser.set_defaults(action='train')
@@ -759,6 +782,10 @@ def main():
     if args.frozen_style_encoder is None:
         args.frozen_style_encoder = True
         
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+
     last_step_path = os.path.join(args.logdir, 'last_step.txt')
     try:
         with open(last_step_path, 'r') as f:
@@ -766,13 +793,16 @@ def main():
     except:
         continue_step = 0
         LOGGER.warning("No file at %s exists. Assuming continue_step of 0...")
-
-    torch.manual_seed(0)
-    np.random.seed(0)
-
-    cfg_path = os.path.join(args.logdir, 'config-zero-shot.yaml')
-    cfg = confugue.Configuration.from_yaml_file(cfg_path)
-    exp = cfg.configure(ExperimentZeroShot, device='cuda', config_path=cfg_path, logdir=args.logdir, pretrained_cola=args.pretrained_cola, continue_training=args.continue_training, frozen_style_encoder=args.frozen_style_encoder, continue_step=continue_step)
+    
+    if args.model_type == 'zero_shot':
+        cfg_path = os.path.join(args.logdir, 'config-zero-shot.yaml')
+        cfg = confugue.Configuration.from_yaml_file(cfg_path)
+        exp = cfg.configure(ExperimentZeroShot, device='cuda', config_path=cfg_path, logdir=args.logdir, pretrained_cola=args.pretrained_cola, continue_training=args.continue_training, frozen_style_encoder=args.frozen_style_encoder, continue_step=continue_step, sr=16_000)
+    else:
+        cfg_path = os.path.join(args.logdir, 'config.yaml')
+        cfg = confugue.Configuration.from_yaml_file(cfg_path)
+        exp = cfg.configure(Experiment, config_path=cfg_path, logdir=args.logdir, sr=16_000,
+                           continue_training=args.continue_training, continue_step=continue_step)
     if args.action == 'train':
         exp.train()
     elif args.action == 'run':
