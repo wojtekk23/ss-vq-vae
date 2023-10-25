@@ -8,6 +8,7 @@ import argparse
 import logging
 import os
 import random
+from collections import OrderedDict
 
 import confugue
 import librosa
@@ -245,7 +246,7 @@ class ModelZeroShotUnfrozenStyle(ModelZeroShot):
 @confugue.configurable
 class Experiment:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0, pretrained_style_encoder=None):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
@@ -261,6 +262,14 @@ class Experiment:
         self.continue_step = continue_step
         if continue_training:
             self.model.load_state_dict(torch.load(os.path.join(self.logdir, 'model_state.pt')))
+        elif pretrained_style_encoder:
+            style_encoder_state_dict = torch.load(pretrained_style_encoder)
+            self.model.style_encoder_rnn.load_state_dict(OrderedDict((
+                (k[len("style_encoder_rnn."):], v) for k, v in style_encoder_state_dict.items() if k.startswith("style_encoder_rnn")
+            )))
+            self.model.style_encoder_1d.load_state_dict(OrderedDict((
+                (k[len("style_encoder_1d."):], v) for k, v in style_encoder_state_dict.items() if k.startswith("style_encoder_1d")
+            )))
         self.model.to(self.device)
         self.optimizer = None
 
@@ -802,7 +811,7 @@ def main():
         cfg_path = os.path.join(args.logdir, 'config.yaml')
         cfg = confugue.Configuration.from_yaml_file(cfg_path)
         exp = cfg.configure(Experiment, config_path=cfg_path, logdir=args.logdir, sr=16_000,
-                           continue_training=args.continue_training, continue_step=continue_step)
+                           continue_training=args.continue_training, continue_step=continue_step, pretrained_style_encoder=args.pretrained_style_encoder)
     if args.action == 'train':
         exp.train()
     elif args.action == 'run':
