@@ -130,6 +130,34 @@ class Model(nn.Module):
 
         return decoded
 
+# TODO: zrób na odwrót xd. Albo tutaj ModelUnfrozenStyle albo napraw ModelZeroShotUnfrozenStyle
+@confugue.configurable
+class ModelFrozenStyle(Model):
+    def forward(self, input_c, input_s, length_c, length_s, return_losses=False):
+        encoded_c, _, losses_c = self.encode_content(input_c)
+        with torch.no_grad():
+            encoded_s, losses_s = self.encode_style(input_s, length_s)
+        decoded = self.decode(encoded_c, encoded_s, length=length_c, max_length=input_c.shape[2])
+
+        if not return_losses:
+            return decoded
+
+        losses = {
+            'reconstruction': ((decoded - input_c) ** 2).mean(axis=1),
+            **losses_c
+        }
+
+        # Sum losses over time and batch, normalize by total time
+        assert all(len(loss.shape) == 2 for loss in losses.values())
+        losses = {name: loss.sum() / (length_c.sum() + torch.finfo(loss.dtype).eps)
+                  for name, loss in losses.items()}
+
+        # Add losses which don't have the time dimension
+        assert all(len(loss.shape) == 1 for loss in losses_s.values())
+        losses.update({name: loss.mean() for name, loss in losses_s.items()})
+
+        return decoded, losses
+
     
 @confugue.configurable
 class ModelZeroShot(nn.Module):
@@ -246,7 +274,7 @@ class ModelZeroShotUnfrozenStyle(ModelZeroShot):
 @confugue.configurable
 class Experiment:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0, pretrained_style_encoder=None):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0, pretrained_style_encoder=None, frozen_style_encoder=True):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
@@ -255,7 +283,11 @@ class Experiment:
         self._inv_spec_fn = self._cfg['invert_spectrogram'].bind(
             librosa.griffinlim, random_state=0)
 
-        self.model = self._cfg['model'].configure(Model)
+        self.frozen_style_encoder = frozen_style_encoder
+        if not self.frozen_style_encoder:
+            self.model = self._cfg['model'].configure(Model)
+        else:
+            self.model = self._cfg['model'].configure(ModelFrozenStyle)
         LOGGER.info(self.model)
         self.device = torch.device(device)
         self.continue_training = continue_training
@@ -282,8 +314,21 @@ class Experiment:
 
             self.model.train(True)
             if not self.optimizer:
+                if self.frozen_style_encoder:
+                    # The model is definitely an instance of ModelZeroShot
+                    params = self.model.parameters()
+                else:
+                    # The model is definitely an instance of ModelZeroShotUnfrozenStyle
+                    params=[
+                        {"params": self.model.content_encoder.parameters()},
+                        {"params": self.model.vq.parameters()},
+                        {"params": self.model.style_encoder_rnn.parameters(), "lr": self.style_encoder_lr},
+                        {"params": self.model.style_encoder_1d.parameters(), "lr": self.style_encoder_lr},
+                        {"params": self.model.style_encoder_0d.parameters(), "lr": self.style_encoder_lr},
+                        {"params": self.model.decoder_modules.parameters()},
+                    ]
                 self.optimizer = self._cfg['optimizer'].configure(
-                    torch.optim.Adam, params=self.model.parameters())
+                    torch.optim.Adam, params=params)
             if self.continue_training:
                 try:
                     self.optimizer.load_state_dict(torch.load(os.path.join(self.logdir, 'optimizer.pt')))
@@ -811,7 +856,7 @@ def main():
         cfg_path = os.path.join(args.logdir, 'config.yaml')
         cfg = confugue.Configuration.from_yaml_file(cfg_path)
         exp = cfg.configure(Experiment, config_path=cfg_path, logdir=args.logdir, sr=16_000,
-                           continue_training=args.continue_training, continue_step=continue_step, pretrained_style_encoder=args.pretrained_style_encoder)
+                           continue_training=args.continue_training, continue_step=continue_step, pretrained_style_encoder=args.pretrained_style_encoder, frozen_style_encoder=args.frozen_style_encoder)
     if args.action == 'train':
         exp.train()
     elif args.action == 'run':
