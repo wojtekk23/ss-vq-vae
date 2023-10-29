@@ -546,7 +546,7 @@ class ExperimentZeroShot:
         self.continue_training = continue_training
         self.continue_step = continue_step
         self.lr = self._cfg['optimizer'].get('lr')
-        self.style_encoder_lr = self._cfg.get('style_encoder_lr') or None
+        self.style_encoder_lr = self._cfg.get('style_encoder_lr') or {}
 
     def train(self):
         with torch.utils.tensorboard.SummaryWriter(log_dir=self.logdir) as tb_writer:
@@ -565,7 +565,9 @@ class ExperimentZeroShot:
                     params=[
                         {"params": self.model.content_encoder.parameters()},
                         {"params": self.model.vq.parameters()},
-                        {"params": self.model.style_encoder.parameters(), "lr": self.style_encoder_lr},
+                        {"params": self.model.style_encoder.encoder.parameters(), "lr": self.style_encoder_lr.get("encoder")},
+                        {"params": self.model.style_encoder.projection.parameters(), "lr": self.style_encoder_lr.get("projection")},
+                        {"params": self.model.style_encoder.layernorm.parameters(), "lr": self.style_encoder_lr.get("layernorm")},
                         {"params": self.model.decoder_modules.parameters()},
                     ]
                 self.optimizer = self._cfg['optimizer'].configure(
