@@ -1,0 +1,1 @@
+time python -m ss_vq_vae.models.vqvae_oneshot --logdir=/mnt/vdb/model-leaky-relu-no-style-pretraining-13-11-2023/ run /mnt/vdb/test_set_pairs.csv outputs/model-leaky-relu-no-style-pretraining-13-11-2023/vqvae_list outputs/model-leaky-relu-no-style-pretraining-13-11-2023/vqvae
