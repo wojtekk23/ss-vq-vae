@@ -49,16 +49,22 @@ class Model(nn.Module):
             for i in range(len(self._cfg['decoder']))
         ])
 
-    def forward(self, input_c, input_s, length_c, length_s, return_losses=False):
+    def forward(self, input_c, input_s, length_c, length_s, output_c=None, output_l=None, return_losses=False):
         encoded_c, _, losses_c = self.encode_content(input_c)
         encoded_s, losses_s = self.encode_style(input_s, length_s)
         decoded = self.decode(encoded_c, encoded_s, length=length_c, max_length=input_c.shape[2])
+
+        # Ensure the tensors have the same size
+        if output_c is not None and decoded.size(-1) != output_c.size(-1):
+            max_len = max(decoded.size(-1), output_c.size(-1))
+            decoded = torch.nn.functional.pad(decoded, (0, max_len - decoded.size(-1))).to(device='cuda')
+            output_c = torch.nn.functional.pad(output_c, (0, max_len - output_c.size(-1))).to(device='cuda')
 
         if not return_losses:
             return decoded
 
         losses = {
-            'reconstruction': ((decoded - input_c) ** 2).mean(axis=1),
+            'reconstruction': ((decoded - (output_c if output_c is not None else input_c)) ** 2).mean(axis=1),
             **losses_c
         }
 
@@ -133,17 +139,23 @@ class Model(nn.Module):
 # TODO: zrób na odwrót xd. Albo tutaj ModelUnfrozenStyle albo napraw ModelZeroShotUnfrozenStyle
 @confugue.configurable
 class ModelFrozenStyle(Model):
-    def forward(self, input_c, input_s, length_c, length_s, return_losses=False):
+    def forward(self, input_c, input_s, length_c, length_s, output_c=None, output_l=None, return_losses=False):
         encoded_c, _, losses_c = self.encode_content(input_c)
         with torch.no_grad():
             encoded_s, losses_s = self.encode_style(input_s, length_s)
         decoded = self.decode(encoded_c, encoded_s, length=length_c, max_length=input_c.shape[2])
 
+        # Ensure the tensors have the same size
+        if output_c is not None and decoded.size(-1) != output_c.size(-1):
+            max_len = max(decoded.size(-1), output_c.size(-1))
+            decoded = torch.nn.functional.pad(decoded, (0, max_len - decoded.size(-1))).to(device='cuda')
+            output_c = torch.nn.functional.pad(output_c, (0, max_len - output_c.size(-1))).to(device='cuda')
+
         if not return_losses:
             return decoded
 
         losses = {
-            'reconstruction': ((decoded - input_c) ** 2).mean(axis=1),
+            'reconstruction': ((decoded - (output_c if output_c is not None else input_c)) ** 2).mean(axis=1),
             **losses_c
         }
 
@@ -303,6 +315,7 @@ class Experiment:
                 (k[len("style_encoder_1d."):], v) for k, v in style_encoder_state_dict.items() if k.startswith("style_encoder_1d")
             )))
         self.model.to(self.device)
+        self.style_encoder_lr = self._cfg.get('style_encoder_lr') or {}
         self.optimizer = None
 
     def train(self):
@@ -322,9 +335,9 @@ class Experiment:
                     params=[
                         {"params": self.model.content_encoder.parameters()},
                         {"params": self.model.vq.parameters()},
-                        {"params": self.model.style_encoder_rnn.parameters(), "lr": self.style_encoder_lr},
-                        {"params": self.model.style_encoder_1d.parameters(), "lr": self.style_encoder_lr},
-                        {"params": self.model.style_encoder_0d.parameters(), "lr": self.style_encoder_lr},
+                        {"params": self.model.style_encoder_rnn.parameters(), "lr": self.style_encoder_lr.get('style_encoder_rnn')},
+                        {"params": self.model.style_encoder_1d.parameters(), "lr": self.style_encoder_lr.get('style_encoder_1d')},
+                        {"params": self.model.style_encoder_0d.parameters(), "lr": self.style_encoder_lr.get('style_encoder_0d')},
                         {"params": self.model.decoder_modules.parameters()},
                     ]
                 self.optimizer = self._cfg['optimizer'].configure(
@@ -344,6 +357,14 @@ class Experiment:
                 torch.utils.data.DataLoader,
                 dataset=self._get_dataset('val', lazy=False),
                 collate_fn=util.collate_padded_tuples)
+            loader_val2 = None
+            if 'val2' in self._cfg['data']:
+                loader_val2 = self._cfg['val_loader'].configure(
+                    torch.utils.data.DataLoader,
+                    dataset=self._get_dataset('val2', lazy=False),
+                    collate_fn=util.collate_padded_tuples,
+                    num_workers=6
+                )
 
             num_epochs = self._cfg.get('epochs', 1)
             val_period = self._cfg.get('val_period', np.nan)
@@ -354,9 +375,9 @@ class Experiment:
             i = self.continue_step
             for epoch in range(num_epochs):
                 LOGGER.info('Starting epoch %d / %d', epoch + 1, num_epochs)
-                for (input_c, length_c), (input_s, length_s) in loader_train:
-                    input_c, length_c, input_s, length_s = (
-                        x.to(self.device) for x in (input_c, length_c, input_s, length_s))
+                for (input_c, length_c), (input_s, length_s), (input_out, length_out) in loader_train:
+                    input_c, length_c, input_s, length_s, input_out, length_out = (
+                        x.to(self.device) for x in (input_c, length_c, input_s, length_s, input_out, length_out))
 
                     # Validation
                     if i % val_period == 0:
@@ -365,12 +386,15 @@ class Experiment:
                             self._validate(loader=loader_val, tb_writer=tb_writer, step=i,
                                            write_samples=(i // val_period) % sample_period == 0,
                                            write_model=True)
+                            self._validate(loader=loader_val2, tb_writer=tb_writer, step=i,
+                                           write_samples=True,
+                                           write_model=True, suffix='zero_shot')
                             LOGGER.info('Validation done')
 
                     # Forward pass
                     if not self.model.training:
                         self.model.train(True)
-                    _, losses = self.model(input_c, input_s, length_c, length_s, return_losses=True)
+                    _, losses = self.model(input_c, input_s, length_c, length_s, input_out, length_out, return_losses=True)
                     self._add_total_loss(losses, step=i)
                     print(f"Step {i}, loss: {losses['total']}")
                     
@@ -401,6 +425,26 @@ class Experiment:
                     i += 1
 
                 LOGGER.info('Epoch %d finished (%d steps)', epoch + 1, i)
+
+    def run_ground(self, data_loader):
+        self.model.train(False)
+        all_outputs, all_losses = [], []
+        all_ground_truths = []
+        input_device = None
+        for (input_c, length_c), (input_s, length_s), (input_gt, length_gt) in data_loader:
+            output, losses = self.model(
+                input_c.to(self.device), input_s.to(self.device),
+                length_c.to(self.device), length_s.to(self.device),
+                input_gt.to(self.device), length_gt.to(self.device),
+                return_losses=True)
+            all_losses.append(losses)
+            all_outputs.extend(output.to(input_c.device))
+            all_ground_truths.extend(input_gt.to(input_c.device))
+
+        all_losses = {name: torch.mean(torch.stack([x[name] for x in all_losses])).to(input_device)
+                      for name in all_losses[0]}
+        self._add_total_loss(all_losses)
+        return all_outputs, all_losses, all_ground_truths
 
     def run(self, data_loader):
         self.model.train(False)
@@ -444,25 +488,39 @@ class Experiment:
                 print(p_output, file=f_triplets)
 
     def _validate(self, loader, tb_writer=None, step=None,
-                  write_losses=True, write_samples=False, write_model=False):
-        outputs, losses = self.run(loader)
+                  write_losses=True, write_samples=False, write_model=False,
+                  suffix=''):
+        if loader is None:
+            return
+        
+        outputs, losses, ground_truths = self.run_ground(loader)
         if write_losses and tb_writer:
             for name, loss in losses.items():
-                tb_writer.add_scalar(f'loss_valid/{name}', loss, step)
+                tb_writer.add_scalar(f'loss_valid_{suffix}/{name}', loss, step)
 
         if write_samples:
             num_samples = self._cfg.get('num_val_samples', 4)
             sample_ids = random.Random(42).sample(range(len(outputs)), num_samples)
             for j in sample_ids:
                 output = outputs[j].numpy()
+                ground_truth = ground_truths[j].numpy()
 
                 fig = plt.figure()
                 librosa.display.specshow(output, figure=fig)
-                tb_writer.add_figure(f'ex/{j}/spec', fig, global_step=step)
+                tb_writer.add_figure(f'ex_{suffix}/{j}/spec', fig, global_step=step)
+                fig_gt = plt.figure()
+                librosa.display.specshow(ground_truth, figure=fig_gt)
+                tb_writer.add_figure(f'gt_{suffix}/{j}/spec', fig_gt, global_step=step)
 
                 audio = self.postprocess(output)
-                tb_writer.add_audio(f'ex/{j}/audio', audio, sample_rate=self.sr,
+                tb_writer.add_audio(f'ex_{suffix}/{j}/audio', audio, sample_rate=self.sr,
                                     global_step=step)
+                audio_gt = self.postprocess(ground_truth)
+                tb_writer.add_audio(f'gt_{suffix}/{j}/audio', audio_gt, sample_rate=self.sr,
+                                    global_step=step)
+                
+                chroma_mse = util.compare_chroma(audio, audio_gt, sr=self.sr)
+                tb_writer.add_scalar(f'chroma_mse/{j}', chroma_mse, step)
 
         if write_model:
             torch.save(self.model.state_dict(), os.path.join(self.logdir, 'model_state.pt'))
@@ -511,7 +569,7 @@ class Experiment:
 
     def _get_dataset(self, section, **kwargs):
         return self._cfg['data'][section].configure(
-            AudioTupleDataset, sr=self.sr, preprocess_fn=self.preprocess,
+            AudioTupleDataset, sr=self.sr, preprocess_fn=self.preprocess, no_ground=False,
             **kwargs)
     
 @confugue.configurable
@@ -722,7 +780,8 @@ class ExperimentZeroShot:
                 print(p_output, file=f_triplets)
 
     def _validate(self, loader, tb_writer=None, step=None,
-                  write_losses=True, write_samples=False, write_model=False, suffix=''):
+                  write_losses=True, write_samples=False, write_model=False,
+                  suffix=''):
         if loader is None:
             return
         
