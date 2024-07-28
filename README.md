@@ -1,24 +1,27 @@
-Self-Supervised VQ-VAE for One-Shot Music Style Transfer
+Self-Supervised VQ-VAE for Zero-Shot Music Style Transfer
 ========================================================
 
-This is the code repository for the ICASSP 2021 paper 
+This is the code repository for the *Zero-shot music timbre transfer by transfer learning from timbre verification* master thesis
+and is mostly based on the [code repository](https://github.com/cifkao/ss-vq-vae) for the paper
 *Self-Supervised VQ-VAE for One-Shot Music Style Transfer*
 by Ondřej Cífka, Alexey Ozerov, Umut Şimşekli, and Gaël Richard.
 
-Copyright 2020 InterDigital R&D and Télécom Paris.
 
-### Links
-[:microscope: Paper preprint](https://arxiv.org/abs/2102.05749) [[pdf](https://arxiv.org/pdf/2102.05749.pdf)]  
-[:musical_note: Supplementary website](https://adasp.telecom-paris.fr/s/ss-vq-vae) with audio examples  
-[:microphone: Demo notebook](https://colab.research.google.com/github/cifkao/ss-vq-vae/blob/main/experiments/colab_demo.ipynb)  
-[:brain: Trained model parameters](https://adasp.telecom-paris.fr/rc-ext/demos_companion-pages/vqvae_examples/ssvqvae_model_state.pt) (212 MB)
+Other repositories
+------------------
+
+The code for the thesis is contained within different repositories:
+
+- [`random-midi-generator`](https://github.com/wojtekk23/random-midi-generator) - Fork of `xanderlewis`'s [`random-midi-generator`](https://github.com/xanderlewis/random-midi-generator)
+- [`MIDIInstrumentSwap`](https://github.com/wojtekk23/MIDIInstrumentSwap) - Generating MIDI files of the same melody with many different instruments
+- [`COLA-PyTorch`](https://github.com/wojtekk23/COLA-PyTorch) - Code for the PyTorch implementation of the [COLA](https://arxiv.org/abs/2010.10915) model
 
 Contents
 --------
 
 - `src` – the main codebase (the `ss-vq-vae` package); install with `pip install ./src`; usage details [below](#Usage)
 - `data` – Jupyter notebooks for data preparation (details [below](#Datasets))
-- `experiments` – model configuration, evaluation, and other experimental stuff
+- `experiments` – model configuration, evaluation, code for generating diagrams/visualizations, notebooks with analyses
 
 Setup
 -----
@@ -37,8 +40,10 @@ python -m ss_vq_vae.models.vqvae_oneshot --logdir=model train
 ```
 This is assuming the training data is prepared (see [below](#Datasets)).
 
-To run the trained model on a dataset, substitute `run` for `train` and specify the input and output paths as arguments (use `run --help` for more information).
-Alternatively, see the [`colab_demo.ipynb`](./experiments/colab_demo.ipynb) notebook for how to run the model from Python code.
+You can also use the scripts provided in the top level directory of the repository:
+
+- `train_finetuned_*.sh` - trains a COLA-based variant
+- `train_original_*.sh` - trains a variant based on the original RNN style encoder
 
 Datasets
 --------
@@ -54,8 +59,3 @@ Each dataset used in the paper has a corresponding directory in `data`, containi
   - the 'real' test set: `data/mixing_secrets/test`
   - the set of triplets for training the timbre metric: `data/mixing_secrets/metric_train`
   - both require downloading and pre-processing the data using `data/mixing_secrets/download.ipynb`
-
-Acknowledgment
---------------
-This work has received funding from the European Union’s Horizon 2020 research and innovation
-programme under the Marie Skłodowska-Curie grant agreement No. 765068.
