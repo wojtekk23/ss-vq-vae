@@ -304,6 +304,7 @@ class Experiment:
         self.device = torch.device(device)
         self.continue_training = continue_training
         self.continue_step = continue_step
+        self.pretrained_style_encoder = pretrained_style_encoder
         if continue_training:
             self.model.load_state_dict(torch.load(os.path.join(self.logdir, 'model_state.pt')))
         elif pretrained_style_encoder:
@@ -328,10 +329,10 @@ class Experiment:
             self.model.train(True)
             if not self.optimizer:
                 if self.frozen_style_encoder:
-                    # The model is definitely an instance of ModelZeroShot
+                    LOGGER.info("!!! FROZEN MODEL")
                     params = self.model.parameters()
-                else:
-                    # The model is definitely an instance of ModelZeroShotUnfrozenStyle
+                elif not self.frozen_style_encoder and self.pretrained_style_encoder:
+                    LOGGER.info("!!! FINETUNED MODEL")
                     params=[
                         {"params": self.model.content_encoder.parameters()},
                         {"params": self.model.vq.parameters()},
@@ -340,13 +341,17 @@ class Experiment:
                         {"params": self.model.style_encoder_0d.parameters(), "lr": self.style_encoder_lr.get('style_encoder_0d')},
                         {"params": self.model.decoder_modules.parameters()},
                     ]
+                else:
+                    LOGGER.info("!!! NO STYLE MODEL")
+                    params = self.model.parameters()
+                
                 self.optimizer = self._cfg['optimizer'].configure(
                     torch.optim.Adam, params=params)
             if self.continue_training:
                 try:
                     self.optimizer.load_state_dict(torch.load(os.path.join(self.logdir, 'optimizer.pt')))
-                except:
-                    LOGGER.warning('Optimizer incompatible (Check frozen vs unfrozen style encoder). Moving on with fresh optimizer...')
+                except Exception as e:
+                    raise Exception('Optimizer incompatible (Check frozen vs unfrozen style encoder). Moving on with fresh optimizer...') from e
 
             loader_train = self._cfg['train_loader'].configure(
                 torch.utils.data.DataLoader,
@@ -606,6 +611,7 @@ class ExperimentZeroShot:
         self.optimizer = None
         self.continue_training = continue_training
         self.continue_step = continue_step
+        self.pretrained_style_encoder = pretrained_style_encoder
         self.lr = self._cfg['optimizer'].get('lr')
         self.style_encoder_lr = self._cfg.get('style_encoder_lr') or {}
 
@@ -619,25 +625,28 @@ class ExperimentZeroShot:
             self.model.train(True)
             if not self.optimizer:
                 if self.frozen_style_encoder:
-                    # The model is definitely an instance of ModelZeroShot
+                    LOGGER.info("!!! FROZEN MODEL")
                     params = self.model.parameters()
-                else:
-                    # The model is definitely an instance of ModelZeroShotUnfrozenStyle
+                elif not self.frozen_style_encoder and self.pretrained_style_encoder:
+                    LOGGER.info("!!! FINETUNED MODEL")
                     params=[
                         {"params": self.model.content_encoder.parameters()},
                         {"params": self.model.vq.parameters()},
                         {"params": self.model.style_encoder.encoder.parameters(), "lr": self.style_encoder_lr.get("encoder")},
-                        {"params": self.model.style_encoder.projection.parameters(), "lr": self.style_encoder_lr.get("projection")},
-                        {"params": self.model.style_encoder.layernorm.parameters(), "lr": self.style_encoder_lr.get("layernorm")},
+                        {"params": self.model.style_encoder.linear.parameters(), "lr": self.style_encoder_lr.get("projection")},
                         {"params": self.model.decoder_modules.parameters()},
                     ]
+                else:
+                    LOGGER.info("!!! NO STYLE MODEL")
+                    params = self.model.parameters()
+                
                 self.optimizer = self._cfg['optimizer'].configure(
                     torch.optim.Adam, params=params)
             if self.continue_training:
                 try:
                     self.optimizer.load_state_dict(torch.load(os.path.join(self.logdir, 'optimizer.pt')))
-                except:
-                    LOGGER.warning('Optimizer incompatible (Check frozen vs unfrozen style encoder). Moving on with fresh optimizer...')
+                except Exception as e:
+                    raise Exception('Optimizer incompatible (Check frozen vs unfrozen style encoder). Moving on with fresh optimizer...') from e
 
             loader_train = self._cfg['train_loader'].configure(
                 torch.utils.data.DataLoader,
@@ -900,17 +909,23 @@ def main():
     if args.frozen_style_encoder is None:
         args.frozen_style_encoder = True
         
+    with open(os.path.join(args.logdir, 'run_config.txt'), 'w') as f:
+        print(args, file=f)
+        print(args)
 
     torch.manual_seed(0)
     np.random.seed(0)
 
-    last_step_path = os.path.join(args.logdir, 'last_step.txt')
-    try:
-        with open(last_step_path, 'r') as f:
-            continue_step = int(f.read())
-    except:
+    if args.continue_training:
+        last_step_path = os.path.join(args.logdir, 'last_step.txt')
+        try:
+            with open(last_step_path, 'r') as f:
+                continue_step = int(f.read())
+        except:
+            continue_step = 0
+            LOGGER.warning("No file at %s exists. Assuming continue_step of 0...", last_step_path)
+    else:
         continue_step = 0
-        LOGGER.warning("No file at %s exists. Assuming continue_step of 0...")
     
     if args.model_type == 'zero_shot':
         cfg_path = os.path.join(args.logdir, 'config-zero-shot.yaml')
