@@ -597,7 +597,10 @@ class ExperimentZeroShot:
         if continue_training:
             self.model.load_state_dict(torch.load(os.path.join(self.logdir, 'model_state.pt')))
         elif pretrained_style_encoder:
-            self.model.style_encoder.load_state_dict(torch.load(pretrained_style_encoder))
+            # We only extract the encoder weights "We discard the projection head for the downstream tasks and train a linear classifier on top of the encoder directly"
+            cola_weights = torch.load(pretrained_style_encoder)
+            style_encoder_weights = {k.replace('encoder.', '', 1): v for k, v in cola_weights.items() if k.startswith('encoder')}
+            self.model.style_encoder.encoder.load_state_dict(style_encoder_weights)
         self.model.to(self.device)
         
         self.optimizer = None
