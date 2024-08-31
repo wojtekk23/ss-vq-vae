@@ -173,12 +173,12 @@ class ModelFrozenStyle(Model):
     
 @confugue.configurable
 class ModelZeroShot(nn.Module):
-    def __init__(self):
+    def __init__(self, frozen_encoder=True):
         super().__init__()
         self.content_encoder = nn.Sequential(*self._cfg['content_encoder'].configure_list())
         self.vq = self._cfg['vq'].configure(VQEmbedding, axis=1)
 
-        self.style_encoder = COLA(1280, 1024)
+        self.style_encoder = COLA(1280, 1024, frozen_encoder=frozen_encoder)
         self.decoder_modules = nn.ModuleList([
             nn.Sequential(*self._cfg['decoder'][i].configure_list())
             for i in range(len(self._cfg['decoder']))
@@ -186,8 +186,7 @@ class ModelZeroShot(nn.Module):
 
     def forward(self, input_c, input_s, length_c, length_s, output_c=None, output_l=None, return_losses=False):
         encoded_c, _, losses_c = self.encode_content(input_c)
-        with torch.no_grad():
-            encoded_s, losses_s = self.encode_style(input_s, length_s)
+        encoded_s, losses_s = self.encode_style(input_s, length_s)
         decoded = self.decode(encoded_c, encoded_s, length=length_c, max_length=input_c.shape[2])
         
         # Ensure the tensors have the same size
@@ -252,36 +251,8 @@ class ModelZeroShot(nn.Module):
     
 @confugue.configurable
 class ModelZeroShotUnfrozenStyle(ModelZeroShot):
-    def forward(self, input_c, input_s, length_c, length_s, output_c=None, output_l=None, return_losses=False):
-        encoded_c, _, losses_c = self.encode_content(input_c)
-        encoded_s, losses_s = self.encode_style(input_s, length_s)
-        decoded = self.decode(encoded_c, encoded_s, length=length_c, max_length=input_c.shape[2])
-        
-        # Ensure the tensors have the same size
-        if output_c is not None and decoded.size(-1) != output_c.size(-1):
-            max_len = max(decoded.size(-1), output_c.size(-1))
-            decoded = torch.nn.functional.pad(decoded, (0, max_len - decoded.size(-1))).to(device='cuda')
-            output_c = torch.nn.functional.pad(output_c, (0, max_len - output_c.size(-1))).to(device='cuda')
-
-        if not return_losses:
-            return decoded
-
-        losses = {
-            'reconstruction': ((decoded - (output_c if output_c is not None else input_c)) ** 2).mean(axis=1),
-            **losses_c
-        }
-
-        # Sum losses over time and batch, normalize by total time
-        assert all(len(loss.shape) == 2 for loss in losses.values())
-        losses = {name: loss.sum() / (length_c.sum() + torch.finfo(loss.dtype).eps)
-                  for name, loss in losses.items()}
-
-        # Add losses which don't have the time dimension
-        assert all(len(loss.shape) == 1 for loss in losses_s.values())
-        losses.update({name: loss.mean() for name, loss in losses_s.items()})
-
-        return decoded, losses
-
+    def __init__():
+        super().__init__(frozen_encoder=False)
 
 @confugue.configurable
 class Experiment:
