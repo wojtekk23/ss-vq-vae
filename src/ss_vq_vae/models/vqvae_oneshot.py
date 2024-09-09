@@ -24,7 +24,7 @@ import wandb
 
 from .cola import COLA
 from ..nn import VQEmbedding
-from ..data import AudioTupleDataset
+from ..data import AudioTupleDataset, SSLAudioTupleDataset
 from .. import util
 
 
@@ -257,11 +257,12 @@ class ModelZeroShotUnfrozenStyle(ModelZeroShot):
 @confugue.configurable
 class Experiment:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0, pretrained_style_encoder=None, frozen_style_encoder=True):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, continue_training=False, continue_step=0, pretrained_style_encoder=None, frozen_style_encoder=True, dataset_type='default'):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
 
+        self._dataset_type = dataset_type
         self._spec_fn = self._cfg['spectrogram'].bind(librosa.stft)
         self._inv_spec_fn = self._cfg['invert_spectrogram'].bind(
             librosa.griffinlim, random_state=0)
@@ -326,18 +327,18 @@ class Experiment:
 
             loader_train = self._cfg['train_loader'].configure(
                 torch.utils.data.DataLoader,
-                dataset=self._get_dataset('train'),
+                dataset=self._get_dataset('train', self._dataset_type),
                 collate_fn=util.collate_padded_tuples,
                 shuffle=True)
             loader_val = self._cfg['val_loader'].configure(
                 torch.utils.data.DataLoader,
-                dataset=self._get_dataset('val', lazy=False),
+                dataset=self._get_dataset('val', 'default', lazy=False),
                 collate_fn=util.collate_padded_tuples)
             loader_val2 = None
             if 'val2' in self._cfg['data']:
                 loader_val2 = self._cfg['val_loader'].configure(
                     torch.utils.data.DataLoader,
-                    dataset=self._get_dataset('val2', lazy=False),
+                    dataset=self._get_dataset('val2', 'default', lazy=False),
                     collate_fn=util.collate_padded_tuples,
                     num_workers=6
                 )
@@ -543,19 +544,28 @@ class Experiment:
     def postprocess(self, spectrogram):
         return self._inv_spec_fn(S=np.expm1(np.maximum(spectrogram, 0)))
 
-    def _get_dataset(self, section, **kwargs):
+    def _get_dataset(self, section, dataset_type, **kwargs):
+        dataset_cls = None
+        if dataset_type == 'default':
+            dataset_cls = AudioTupleDataset
+        elif dataset_type == 'ssl':
+            dataset_cls = SSLAudioTupleDataset
+        else:
+            raise ValueError(f"Invalid dataset_type {dataset_type}")
         return self._cfg['data'][section].configure(
-            AudioTupleDataset, sr=self.sr, preprocess_fn=self.preprocess, no_ground=False,
-            **kwargs)
+            dataset_cls, sr=self.sr,
+            preprocess_fn=self.preprocess, no_ground=False, **kwargs
+        )
     
 @confugue.configurable
 class ExperimentZeroShot:
 
-    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, pretrained_style_encoder=None, continue_training=False, frozen_style_encoder=True, continue_step=None):
+    def __init__(self, logdir, config_path=None, device='cuda', sr=16_000, pretrained_style_encoder=None, continue_training=False, frozen_style_encoder=True, continue_step=None, dataset_type='default'):
         self.logdir = logdir
         self.config_path = config_path
         self.sr = sr
 
+        self._dataset_type = dataset_type
         self._spec_fn = self._cfg['spectrogram'].bind(librosa.stft)
         self._mel_spec_fn = self._cfg['melspectrogram'].bind(librosa.feature.melspectrogram)
         self._inv_spec_fn = self._cfg['invert_spectrogram'].bind(
@@ -621,14 +631,14 @@ class ExperimentZeroShot:
 
             loader_train = self._cfg['train_loader'].configure(
                 torch.utils.data.DataLoader,
-                dataset=self._get_dataset('train'),
+                dataset=self._get_dataset('train', self._dataset_type),
                 collate_fn=util.collate_padded_tuples,
                 shuffle=True,
                 num_workers=6
             )
             loader_val = self._cfg['val_loader'].configure(
                 torch.utils.data.DataLoader,
-                dataset=self._get_dataset('val', lazy=False),
+                dataset=self._get_dataset('val', 'default', lazy=False),
                 collate_fn=util.collate_padded_tuples,
                 num_workers=6
             )
@@ -636,7 +646,7 @@ class ExperimentZeroShot:
             if 'val2' in self._cfg['data']:
                 loader_val2 = self._cfg['val_loader'].configure(
                     torch.utils.data.DataLoader,
-                    dataset=self._get_dataset('val2', lazy=False),
+                    dataset=self._get_dataset('val2', 'default', lazy=False),
                     collate_fn=util.collate_padded_tuples,
                     num_workers=6
                 )
@@ -845,9 +855,16 @@ class ExperimentZeroShot:
     def postprocess(self, spectrogram):
         return self._inv_spec_fn(S=np.expm1(np.maximum(spectrogram, 0)))
 
-    def _get_dataset(self, section, **kwargs):
+    def _get_dataset(self, section, dataset_type, **kwargs):
+        dataset_cls = None
+        if dataset_type == 'default':
+            dataset_cls = AudioTupleDataset
+        elif dataset_type == 'ssl':
+            dataset_cls = SSLAudioTupleDataset
+        else:
+            raise ValueError(f"Invalid dataset_type {dataset_type}")
         return self._cfg['data'][section].configure(
-            AudioTupleDataset, sr=self.sr, preprocess_fn=self.preprocess,
+            dataset_cls, sr=self.sr, preprocess_fn=self.preprocess,
             mel_preprocess_fn=self._mel_spec_fn, no_ground=False,
             **kwargs)
 
@@ -859,6 +876,7 @@ def main():
     parser.add_argument('--continue_training', dest='continue_training', action='store_true')
     parser.add_argument('--unfrozen_style_encoder', dest='frozen_style_encoder', action='store_false')
     parser.add_argument('--model_type', type=str, choices=['zero_shot', 'original'], default='zero_shot')
+    parser.add_argument('--dataset_type', type=str, choices=['default', 'ssl'], default='default')
     actions = parser.add_subparsers(title='action')
     train_parser = actions.add_parser('train', help='Train the model')
     train_parser.set_defaults(action='train')
@@ -901,12 +919,15 @@ def main():
     if args.model_type == 'zero_shot':
         cfg_path = os.path.join(args.logdir, 'config-zero-shot.yaml')
         cfg = confugue.Configuration.from_yaml_file(cfg_path)
-        exp = cfg.configure(ExperimentZeroShot, device='cuda', config_path=cfg_path, logdir=args.logdir, pretrained_style_encoder=args.pretrained_style_encoder, continue_training=args.continue_training, frozen_style_encoder=args.frozen_style_encoder, continue_step=continue_step, sr=16_000)
+        exp = cfg.configure(ExperimentZeroShot, device='cuda', config_path=cfg_path, logdir=args.logdir, pretrained_style_encoder=args.pretrained_style_encoder,
+                            continue_training=args.continue_training, frozen_style_encoder=args.frozen_style_encoder,
+                            continue_step=continue_step, sr=16_000, dataset_type=args.dataset_type)
     else:
         cfg_path = os.path.join(args.logdir, 'config.yaml')
         cfg = confugue.Configuration.from_yaml_file(cfg_path)
         exp = cfg.configure(Experiment, config_path=cfg_path, logdir=args.logdir, sr=16_000,
-                           continue_training=args.continue_training, continue_step=continue_step, pretrained_style_encoder=args.pretrained_style_encoder, frozen_style_encoder=args.frozen_style_encoder)
+                            continue_training=args.continue_training, continue_step=continue_step, pretrained_style_encoder=args.pretrained_style_encoder,
+                            frozen_style_encoder=args.frozen_style_encoder, dataset_type=args.dataset_type)
     if args.action == 'train':
         exp.train()
     elif args.action == 'run':

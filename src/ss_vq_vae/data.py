@@ -61,3 +61,20 @@ class AudioTupleDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self._path_tuples)
+
+class SSLAudioTupleDataset(AudioTupleDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _load(self, index):
+        style_audio, ground_audio = (librosa.load(path, sr=self._sr)[0] for path in self._path_tuples[index][1:])
+        style_mels = None
+        if self._mel_preprocess_fn is not None:
+            style_mels = self._mel_preprocess_fn(y=audios[1])
+        if self._preprocess_fn is not None:
+            style_audio, ground_audio = [self._preprocess_fn(audio) for audio in (style_audio, ground_audio)]
+
+        if self._no_ground:
+            return ground_audio, style_mels if style_mels is not None else style_audio
+        else:
+            return ground_audio, style_mels if style_mels is not None else style_audio, ground_audio
