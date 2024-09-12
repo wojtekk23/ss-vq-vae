@@ -16,6 +16,13 @@ The code for the thesis is contained within different repositories:
 - [`MIDIInstrumentSwap`](https://github.com/wojtekk23/MIDIInstrumentSwap) - Generating MIDI files of the same melody with many different instruments
 - [`COLA-PyTorch`](https://github.com/wojtekk23/COLA-PyTorch) - Code for the PyTorch implementation of the [COLA](https://arxiv.org/abs/2010.10915) model
 
+Models, outputs, datasets
+-------------------------
+
+- [Model outputs](https://drive.google.com/drive/folders/1VdM5QtXtb7ZUBPPnHEj3tRyP2NQBaZ2N?usp=sharing)
+- [Synthesized MIDI Dataset](https://drive.google.com/drive/folders/1xDLJwC2hBSEuPHZwE634xvi8JZYL9RsB?usp=sharing)
+- [Model weights, configurations and training histories](https://drive.google.com/drive/folders/1h64rJerW8LmXkDkKNK7WigqxRD4K7rXC?usp=sharing)
+
 Contents
 --------
 
