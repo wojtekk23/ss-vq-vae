@@ -23,6 +23,23 @@ Models, outputs, datasets
 - [Synthesized MIDI Dataset](https://drive.google.com/drive/folders/1xDLJwC2hBSEuPHZwE634xvi8JZYL9RsB?usp=sharing)
 - [Model weights, configurations and training histories](https://drive.google.com/drive/folders/1h64rJerW8LmXkDkKNK7WigqxRD4K7rXC?usp=sharing)
 
+Models in the folders above:
+
+- `run-without-violin-bowed-27-10-2023` - COLA-style style encoder
+- `run-contrastive-original-without-violin-bowed-21-11-2023` - RNN-style style encoder
+- `run-contrastive-original-style-metric-nsynth-12-07-2024` - RNN-style model used as the timbre similarity metric
+- `model-original-no-style-pretraining-with-ssl-dataloader-07-09-2024` - Timbre transfer model with RNN-style style encoder, no style pretraining, using the SSL dataloader (like Cifka et al. 2021)
+- `model-original-no-style-pretraining-19-11-2023` - Timbre transfer model with RNN-style style encoder, no style pretraining
+- `model-original-frozen-style-pretraining-21-11-2023` - Timbre transfer model with RNN-style style encoder, style encoder frozen
+- `model-original-finetuned-style-pretraining-22-11-2023` - Timbre transfer model with RNN-style style encoder, style encoder finetuned
+- `model-leaky-relu-no-style-pretraining-30-08-2024` - Timbre transfer model with COLA-style style encoder, no style pretraining
+- `model-leaky-relu-no-style-pretraining-13-11-2023` - Old/unused version of the above
+- `model-leaky-relu-frozen-style-pretraining-01-09-2024` - Timbre transfer model with COLA-style style encoder, style encoder frozen
+- `model-leaky-relu-frozen-style-pretraining-15-11-2023` - Old/unused version of the above
+- `model-leaky-relu-finetuned-style-pretraining-29-08-2024` - Timbre transfer model with COLA-style style encoder, style encoder finetuned
+- `model-leaky-relu-finetuned-style-pretraining-15-11-2023` - Old/unused version of the above
+
+
 Contents
 --------
 
