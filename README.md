@@ -23,6 +23,23 @@ Models, outputs, datasets
 - [Synthesized MIDI Dataset](https://drive.google.com/drive/folders/1xDLJwC2hBSEuPHZwE634xvi8JZYL9RsB?usp=sharing)
 - [Model weights, configurations and training histories](https://drive.google.com/drive/folders/1h64rJerW8LmXkDkKNK7WigqxRD4K7rXC?usp=sharing)
 
+Models in the folders above:
+
+- `run-without-violin-bowed-27-10-2023` - COLA-style style encoder
+- `run-contrastive-original-without-violin-bowed-21-11-2023` - RNN-style style encoder
+- `run-contrastive-original-style-metric-nsynth-12-07-2024` - RNN-style model used as the timbre similarity metric
+- `model-original-no-style-pretraining-with-ssl-dataloader-07-09-2024` - Timbre transfer model with RNN-style style encoder, no style pretraining, using the SSL dataloader (like Cifka et al. 2021)
+- `model-original-no-style-pretraining-19-11-2023` - Timbre transfer model with RNN-style style encoder, no style pretraining
+- `model-original-frozen-style-pretraining-21-11-2023` - Timbre transfer model with RNN-style style encoder, style encoder frozen
+- `model-original-finetuned-style-pretraining-22-11-2023` - Timbre transfer model with RNN-style style encoder, style encoder finetuned
+- `model-leaky-relu-no-style-pretraining-30-08-2024` - Timbre transfer model with COLA-style style encoder, no style pretraining
+- `model-leaky-relu-no-style-pretraining-13-11-2023` - Old/unused version of the above
+- `model-leaky-relu-frozen-style-pretraining-01-09-2024` - Timbre transfer model with COLA-style style encoder, style encoder frozen
+- `model-leaky-relu-frozen-style-pretraining-15-11-2023` - Old/unused version of the above
+- `model-leaky-relu-finetuned-style-pretraining-29-08-2024` - Timbre transfer model with COLA-style style encoder, style encoder finetuned
+- `model-leaky-relu-finetuned-style-pretraining-15-11-2023` - Old/unused version of the above
+
+
 Contents
 --------
 
@@ -51,18 +68,3 @@ You can also use the scripts provided in the top level directory of the reposito
 
 - `train_finetuned_*.sh` - trains a COLA-based variant
 - `train_original_*.sh` - trains a variant based on the original RNN style encoder
-
-Datasets
---------
-Each dataset used in the paper has a corresponding directory in `data`, containing a Jupyter notebook called `prepare.ipynb` for preparing the dataset:
-- the entire training and validation dataset: `data/comb`; combined from LMD and RT (see below)
-- [Lakh MIDI Dataset](https://colinraffel.com/projects/lmd/) (LMD), rendered as audio using SoundFonts
-  - the part used as training and validation data: `data/lmd/audio_train`
-  - the part used as the 'artificial' test set: `data/lmd/audio_test`
-  - both require [downloading](http://hog.ee.columbia.edu/craffel/lmd/lmd_full.tar.gz) the raw data and pre-processing it using `data/lmd/note_seq/prepare.ipynb`
-  - the following SoundFonts are required (available [here](https://packages.debian.org/buster/fluid-soundfont-gm) and [here](https://musescore.org/en/handbook/soundfonts-and-sfz-files#list)): `FluidR3_GM.sf2`, `TimGM6mb.sf2`, `Arachno SoundFont - Version 1.0.sf2`, `Timbres Of Heaven (XGM) 3.94.sf2`
-- RealTracks (RT) from [Band-in-a-Box](https://www.pgmusic.com/) UltraPAK 2018 (not freely available): `data/rt`
-- [Mixing Secrets](https://www.cambridge-mt.com/ms/mtk/) data
-  - the 'real' test set: `data/mixing_secrets/test`
-  - the set of triplets for training the timbre metric: `data/mixing_secrets/metric_train`
-  - both require downloading and pre-processing the data using `data/mixing_secrets/download.ipynb`
