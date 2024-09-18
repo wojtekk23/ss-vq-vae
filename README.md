@@ -34,8 +34,8 @@ Setup
 -----
 
 ```sh
-pip install -r requirements.txt
-pip install ./src
+pip install -r requirements-frozen.txt
+pip install -e ./src
 ```
 
 Usage
